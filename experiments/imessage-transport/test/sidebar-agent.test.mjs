@@ -229,7 +229,7 @@ test("agent binds the iMessage identities before parsing or executing", async ()
     ["membership", GROUP_ID, USER_ID],
     ["list", GROUP_ID, USER_ID],
   ]);
-  assert.match(result, /#3 Will Dan be late\?/);
+  assert.match(result.join("\n"), /#3 will dan be late\?/);
 });
 
 test("unbound identities cannot reach the database", async () => {
@@ -351,7 +351,7 @@ test("explains a group request without creating a market", async () => {
 
   assert.equal(mutated, false);
   assert.deepEqual(result, [
-    "this chat is already the sidebar group “Monkey Business”",
+    "this chat is already the sidebar group “monkey business”",
     "were you trying to make a market?",
   ]);
 });
@@ -381,6 +381,44 @@ test("returns social replies without attempting a market action", async () => {
   });
   assert.equal(mutated, false);
   assert.deepEqual(result, ["damn 😭", "i'm locked in"]);
+});
+
+test("carries recent Sidebar turns into the next request in the same group", async () => {
+  const seenContexts = [];
+  let turn = 0;
+  const agent = createSidebarAgent({
+    client: {
+      requireMembership: async () => undefined,
+      listMarkets: async () => [],
+    },
+    resolveBinding: async () => ({ status: "bound", groupId: GROUP_ID, userId: USER_ID }),
+    parseIntent: async ({ conversationContext }) => {
+      seenContexts.push(conversationContext);
+      turn += 1;
+      return {
+        action: "chat",
+        replyMessages: [turn === 1 ? "first answer" : "second answer"],
+      };
+    },
+    renderReply: async ({ canonicalReply }) => canonicalReply,
+    now: () => NOW,
+  });
+
+  await agent({
+    conversationId: "chat-1",
+    senderId: "sender-1",
+    text: "sidebar remember this",
+  });
+  await agent({
+    conversationId: "chat-1",
+    senderId: "sender-1",
+    text: "sidebar what did i say?",
+  });
+
+  assert.deepEqual(seenContexts[0], []);
+  assert.equal(seenContexts[1].length, 1);
+  assert.equal(seenContexts[1][0].user, "sidebar remember this");
+  assert.deepEqual(seenContexts[1][0].assistant, ["first answer"]);
 });
 
 test("answers a health check in short useful bubbles", async () => {
@@ -446,7 +484,7 @@ test("turns an asynchronous database rejection into one user-facing reply", asyn
     senderId: "sender-1",
     text: "@sidebar, resolve Dan being late as void",
   });
-  assert.equal(reply, "couldn't do that — market has not closed yet");
+  assert.deepEqual(reply, ["couldn't do that — market has not closed yet"]);
 });
 
 test("keeps an incomplete market draft and fills it over the next invoked message", async () => {
@@ -492,7 +530,7 @@ test("keeps an incomplete market draft and fills it over the next invoked messag
     senderId: "sender-1",
     text: "@sidebar make a bitcoin market",
   });
-  assert.match(first, /when should betting close/);
+  assert.match(first.join("\n"), /when should betting close/);
   assert.equal(opened.length, 0);
 
   const second = await agent({
@@ -503,7 +541,7 @@ test("keeps an incomplete market draft and fills it over the next invoked messag
   assert.equal(seenDrafts[0], null);
   assert.equal(seenDrafts[1].question, "Will Bitcoin be above 70k?");
   assert.equal(opened.length, 1);
-  assert.match(second, /market #7 is live/);
+  assert.match(second.join("\n"), /market #7 is live/);
 });
 
 test("pending market drafts expire and stay isolated by group and member", () => {

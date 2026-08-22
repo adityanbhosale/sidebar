@@ -272,18 +272,18 @@ test("treats addressed banter as chat instead of an incomplete market command", 
   assert.deepEqual(result.replyMessages, ["damn 😭", "i'm locked in"]);
 });
 
-test("downgrades an ungrounded model guess before it can become an app action", async () => {
+test("does not replace the model's semantic classification with a keyword fallback", async () => {
   const result = await parseNaturalLanguageIntent({
     text: "sidebar lock in bro",
     apiKey: "test-key",
     fetchImpl: async () => modelResponse({
-      action: "place_bet",
-      clarification: "Which market number and side?",
+      action: "chat",
+      replyMessages: ["i'm locked in"],
       confidence: 0.99,
     }),
   });
   assert.equal(result.action, "chat");
-  assert.deepEqual(result.replyMessages, ["what's up?"]);
+  assert.deepEqual(result.replyMessages, ["i'm locked in"]);
 });
 
 test("uses strict structured output for ambiguous invoked language", async () => {
@@ -402,6 +402,31 @@ test("gives the model safe pending-draft context for creation follow-ups", async
   assert.match(requestBody.input[0].content, /Pending market draft/);
   assert.match(requestBody.input[0].content, /Will Dan be late/);
   assert.equal(requestBody.input[0].content.includes("subjectPhoneHash"), false);
+});
+
+test("gives the planner recent context from only the current Sidebar group", async () => {
+  let requestBody;
+  await parseNaturalLanguageIntent({
+    text: "sidebar put 20 on that one",
+    apiKey: "test-key",
+    conversationContext: [{
+      speaker: "member-a",
+      user: "sidebar show markets",
+      assistant: ["#3 will dan be late?"],
+    }],
+    fetchImpl: async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return modelResponse({
+        action: "place_bet",
+        marketNumber: 3,
+        side: "yes",
+        amount: 20,
+        confidence: 0.99,
+      });
+    },
+  });
+  assert.match(requestBody.input[0].content, /Recent group-scoped Sidebar turns/);
+  assert.match(requestBody.input[0].content, /will dan be late/i);
 });
 
 function modelResponse(overrides) {

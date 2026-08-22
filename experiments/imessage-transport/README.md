@@ -234,15 +234,27 @@ group conversation cannot accidentally invoke parsing, an API call, or a
 database action.
 
 When `OPENAI_API_KEY` is configured, every explicit `sidebar` request goes to
-the OpenAI intent parser first. Ordinary group chatter is still discarded
-before any API call. The model returns a strict structured intent; application
-validation and Supabase RPCs remain the authority for every mutation. If the
-model is unavailable, obvious commands fall back to the local parser.
+the OpenAI turn planner first. Ordinary group chatter is still discarded
+before any API call. The planner returns a strict structured intent;
+application validation and Supabase RPCs remain the authority for every
+mutation. Once deterministic execution finishes, a separate structured reply
+renderer turns the canonical result into one to three concise iMessage bubbles.
+It cannot execute actions, and its output is discarded if it adds or drops any
+numeric fact, market number, percentage, time, or URL. If either model call is
+unavailable, obvious commands and known-good result messages fall back locally.
 
 Set the key in the root `.env.local` or export it in the launching shell. Do
 not put a key in this repository or a chat message. `OPENAI_INTENT_MODEL`
-defaults to `gpt-5.4-nano`. Set `SIDEBAR_INTENT_MODE=deterministic_first` only
-if reducing API calls matters more than natural-language coverage.
+defaults to `gpt-5.4-nano`. `OPENAI_REPLY_MODEL` can select a separate rendering
+model and otherwise inherits `OPENAI_INTENT_MODEL`. Set
+`SIDEBAR_INTENT_MODE=deterministic_first` only if reducing API calls matters
+more than natural-language coverage.
+
+Sidebar keeps at most eight invoked turns in memory for one hour, keyed by the
+bound Sidebar group. This lets follow-ups like `sidebar put 20 on that one`
+refer to the previous Sidebar exchange without mixing overlapping native
+groups. Ordinary chatter is never added, and phone-like values are redacted
+before a turn enters this short-lived context.
 
 Incomplete market creation is conversational. Sidebar keeps a group-and-member
 scoped draft for 15 minutes and asks one short question at a time for the

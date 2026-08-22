@@ -22,6 +22,13 @@ test("normalizes array replies into lowercase chat bubbles", () => {
   ]);
 });
 
+test("keeps case-sensitive URLs intact while lowercasing surrounding text", () => {
+  assert.deepEqual(
+    replyMessages("OPEN https://trysidebar.xyz/setup?token=AbC123XyZ NOW"),
+    ["open https://trysidebar.xyz/setup?token=AbC123XyZ now"],
+  );
+});
+
 test("sends reply bubbles in order with a small pause", async () => {
   const events = [];
   await sendReplySequence({

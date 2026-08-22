@@ -6,6 +6,8 @@ import {
 import { SidebarDbError } from "./sidebar-client.mjs";
 import { fingerprint } from "./transport-core.mjs";
 import { deriveRegisteredPhoneHash } from "./web-onboarding.mjs";
+import { createConversationContextStore } from "./conversation-context.mjs";
+import { createNaturalReplyRenderer } from "./response-renderer.mjs";
 
 export function createSidebarAgent({
   client,
@@ -16,6 +18,8 @@ export function createSidebarAgent({
   issueSetupLink,
   hashPhone = (value) => deriveRegisteredPhoneHash(value, process.env.SESSION_SECRET),
   pendingMarketDrafts = createPendingMarketDraftStore({ now }),
+  conversationContexts = createConversationContextStore({ now }),
+  renderReply = createNaturalReplyRenderer(),
   dryRun = false,
 } = {}) {
   if (!client || !resolveBinding) throw new Error("Sidebar agent needs a client and binding resolver.");
@@ -59,20 +63,23 @@ export function createSidebarAgent({
       return "this chat is connected, but you aren't\nsend sidebar start";
     }
 
+    const recentContext = conversationContexts.get(binding.groupId);
+    let intent = null;
     try {
       await client.requireMembership(binding.groupId, binding.userId);
       const marketRows = await client.listMarkets(binding.groupId, binding.userId);
       const pendingMarketDraft = pendingMarketDrafts.get(binding.groupId, binding.userId);
       const requestTime = now();
-      const intent = await parseIntent({
+      intent = await parseIntent({
         text: envelope.text,
         now: requestTime,
         timezone,
         markets: marketRows.map(({ market }) => market),
         pendingMarketDraft: publicDraftContext(pendingMarketDraft),
+        conversationContext: recentContext,
       });
       if (!intent) return null;
-      return await executeIntent({
+      const canonicalReply = await executeIntent({
         client,
         intent,
         binding,
@@ -87,11 +94,35 @@ export function createSidebarAgent({
         hashPhone,
         dryRun,
       });
+      const reply = await renderReply({
+        request: envelope.text,
+        intent,
+        canonicalReply,
+        conversationContext: recentContext,
+      });
+      rememberTurn(conversationContexts, binding, envelope.text, reply);
+      return reply;
     } catch (error) {
       const message = safeErrorMessage(error);
-      return `couldn't do that — ${message}`;
+      const canonicalReply = `couldn't do that — ${message}`;
+      const reply = await renderReply({
+        request: envelope.text,
+        intent: intent ?? { action: "error" },
+        canonicalReply,
+        conversationContext: recentContext,
+      });
+      rememberTurn(conversationContexts, binding, envelope.text, reply);
+      return reply;
     }
   };
+}
+
+function rememberTurn(store, binding, userMessage, assistantReply) {
+  store.append(binding.groupId, {
+    speaker: fingerprint(binding.userId),
+    user: userMessage,
+    assistant: assistantReply,
+  });
 }
 
 export async function executeIntent({

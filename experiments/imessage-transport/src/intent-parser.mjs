@@ -96,6 +96,7 @@ export async function parseNaturalLanguageIntent({
   timezone = "America/New_York",
   markets = [],
   pendingMarketDraft = null,
+  conversationContext = [],
   apiKey = process.env.OPENAI_API_KEY,
   model = process.env.OPENAI_INTENT_MODEL ?? "gpt-5.4-nano",
   intentMode = process.env.SIDEBAR_INTENT_MODE ?? "llm_first",
@@ -128,7 +129,13 @@ export async function parseNaturalLanguageIntent({
         input: [
           {
             role: "developer",
-            content: buildSystemPrompt({ now, timezone, markets, pendingMarketDraft }),
+            content: buildSystemPrompt({
+              now,
+              timezone,
+              markets,
+              pendingMarketDraft,
+              conversationContext,
+            }),
           },
           { role: "user", content: stripBotPrefix(text) },
         ],
@@ -155,25 +162,11 @@ export async function parseNaturalLanguageIntent({
     if (!outputText) throw new Error("OpenAI returned no structured intent output.");
 
     const modeled = validateModelIntent(JSON.parse(outputText));
-    const request = stripBotPrefix(text).trim();
-    // Group and market are different product objects. A clear group request
-    // must never be promoted into a market mutation, even if the model errs.
+    // These two tiny, unambiguous checks prevent the model from turning a
+    // transport check or product-level group request into a market mutation.
+    // Their final wording still comes from the response renderer.
     if (new Set(["group_request", "health_check"]).has(deterministic?.action)) {
       return deterministic;
-    }
-    // An addressed joke cannot become a half-filled market action. Pending
-    // drafts and fully grounded commands still pass through normally.
-    if (
-      !pendingMarketDraft &&
-      !deterministic &&
-      !hasProductRequestSignal(request) &&
-      modeled.action !== "chat"
-    ) {
-      return intent("chat", {
-        replyMessages: modeled.replyMessages?.length
-          ? modeled.replyMessages
-          : fallbackChat().replyMessages,
-      });
     }
     if (modeled.action === "unknown" && deterministic) return deterministic;
     return modeled;
@@ -540,7 +533,13 @@ function unknown(clarification) {
   return intent("unknown", { clarification });
 }
 
-function buildSystemPrompt({ now, timezone, markets, pendingMarketDraft }) {
+function buildSystemPrompt({
+  now,
+  timezone,
+  markets,
+  pendingMarketDraft,
+  conversationContext,
+}) {
   const marketContext = markets
     .slice(0, 20)
     .map((market) => `#${market.display_num}: ${market.question}`)
@@ -549,6 +548,7 @@ function buildSystemPrompt({ now, timezone, markets, pendingMarketDraft }) {
     "Classify one message addressed to Sidebar, and extract an app action only when the user actually requests one.",
     "Do not execute anything and do not invent IDs, amounts, outcomes, or times.",
     "Use chat for jokes, insults, encouragement, banter, reactions, or anything that does not ask to read or change Sidebar state. Idioms such as lock in, bet, odds, or stake are not app commands without actual market context.",
+    "Respond to the meaning of casual text. A system check needs a direct status answer; criticism or banter needs a relevant human reaction, never a random generic phrase.",
     "Use health_check for test, ping, status, are you working, are you there, or similar checks that Sidebar is responding.",
     "Use group_request when the user asks to create, make, name, rename, title, or open a group or group chat. A native iMessage chat maps to one Sidebar group, so never reinterpret a group request as create_market. Copy an explicitly requested name into requestedGroupName.",
     "For clear market creation intent, always return create_market even when fields are missing. Leave missing fields null so the app can ask one follow-up at a time.",
@@ -568,6 +568,9 @@ function buildSystemPrompt({ now, timezone, markets, pendingMarketDraft }) {
     pendingMarketDraft
       ? `Pending market draft:\n${JSON.stringify(pendingMarketDraft)}`
       : "Pending market draft: none",
+    Array.isArray(conversationContext) && conversationContext.length
+      ? `Recent group-scoped Sidebar turns:\n${JSON.stringify(conversationContext.slice(-6))}`
+      : "Recent group-scoped Sidebar turns: none",
   ].join("\n");
 }
 

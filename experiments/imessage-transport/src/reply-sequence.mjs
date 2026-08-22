@@ -6,7 +6,14 @@ export function replyMessages(reply) {
     .flatMap((value) => String(value ?? "").split(/\n+/))
     .map((value) => value.trim())
     .filter(Boolean)
-    .map((value) => value.toLocaleLowerCase("en-US"));
+    .map(lowercaseChatMessage);
+}
+
+export function lowercaseChatMessage(value) {
+  return String(value)
+    .split(/(https?:\/\/\S+)/gi)
+    .map((part) => (/^https?:\/\//i.test(part) ? part : part.toLocaleLowerCase("en-US")))
+    .join("");
 }
 
 export async function sendReplySequence({
